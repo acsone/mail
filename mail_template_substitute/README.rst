@@ -77,6 +77,7 @@ Contributors
 
 - Bejaoui Souheil <souheil.bejaoui@acsone.eu>
 - Karthik <karthik@sodexis.com>
+- Eugenio Micó <eugenio@studio73.es>
 
 Maintainers
 -----------
