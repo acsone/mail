@@ -36,6 +36,11 @@ class MailMail(models.Model):
         if is_out_of_scope or not is_from_composer:
             return res
 
+        # In the absence of self.email_to, Odoo builds an extra Cc-only email
+        # (see odoo/odoo@46bad8f0). Every Cc partner is also a recipient and
+        # already gets its own email, so that one is a duplicate here.
+        res = [m for m in res if m["email_to"]]
+
         # Prepare values for To, Cc headers
         partners_cc_bcc = self.recipient_cc_ids + self.recipient_bcc_ids
         partner_to_ids = [r.id for r in self.recipient_ids if r not in partners_cc_bcc]
@@ -45,13 +50,20 @@ class MailMail(models.Model):
         email_cc = format_emails_str(self.recipient_cc_ids)
         email_bcc = [r.email for r in self.recipient_bcc_ids if r.email]
 
-        # Collect recipients (RCPT TO) and update all emails
-        # with the same To, Cc headers (to be shown by email client as users expect)
-        recipients = set()
+        # Update all emails with the same To, Cc headers (to be shown by the
+        # email client as users expect)
         for m in res:
-            # Odoo reuses the headers dictionary for all outgoing entries.
-            # Copy it before adding recipient-specific headers.
-            m["headers"] = dict(m["headers"])
+            # Odoo reuses the headers dictionary for all outgoing entries:
+            # copy it before adding recipient-specific headers. Odoo 19 also adds every external recipient to 'X-Msg-To-Add', which
+            # every external recipient to 'X-Msg-To-Add', which
+            # IrMailServer._alter_message__ merges into the To header to enable
+            # Reply-All: here it would put the Cc *and the Bcc* recipients in To,
+            # so drop it — this module builds the whole To / Cc itself.
+            m["headers"] = {
+                key: value
+                for key, value in m["headers"].items()
+                if key != "X-Msg-To-Add"
+            }
             rcpt_to = None
             if m["email_to"]:
                 rcpt_to = extract_rfc2822_addresses(m["email_to"][0])[0]
@@ -64,14 +76,6 @@ class MailMail(models.Model):
                 if rcpt_to in email_bcc:
                     m["headers"].update({"X-Odoo-Bcc": m["email_to"][0]})
 
-            # in the absence of self.email_to, Odoo creates one special mail for CC
-            # see https://github.com/odoo/odoo/commit/46bad8f0
-            elif m["email_cc"]:
-                rcpt_to = extract_rfc2822_addresses(m["email_cc"][0])[0]
-
-            if rcpt_to:
-                recipients.add(rcpt_to)
-
             m.update(
                 {
                     "email_to": email_to,
@@ -79,8 +83,5 @@ class MailMail(models.Model):
                     "email_cc": email_cc,
                 }
             )
-
-        if len(res) > len(recipients):
-            res.pop()
 
         return res
