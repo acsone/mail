@@ -167,8 +167,11 @@ class TestMailCcBcc(TestMailComposerForm, MailComposerCcBccMixin):
             visible = f"{mail['email_to']} {mail['email_cc']}"
             for bcc_email in bcc_emails:
                 self.assertNotIn(bcc_email, visible)
-            if headers.get("X-Odoo-Bcc"):
-                seen_bcc.add(extract_rfc2822_addresses(headers["X-Odoo-Bcc"])[0])
+            # the informational marker must not be set by default: unlike Bcc
+            # it is not stripped before sending (OCA/mail#233)
+            self.assertNotIn("X-Odoo-Bcc", headers)
+            if headers.get("Bcc"):
+                seen_bcc.add(extract_rfc2822_addresses(headers["Bcc"])[0])
 
         # each Bcc recipient got its own email
         self.assertEqual(seen_bcc, bcc_emails)
@@ -191,6 +194,25 @@ class TestMailCcBcc(TestMailComposerForm, MailComposerCcBccMixin):
 
         for mail in self._mails:
             self.assertNotIn("X-Msg-To-Add", mail.get("headers") or {})
+
+    def test_email_cc_bcc_marker_opt_in(self):
+        """The 'X-Odoo-Bcc' marker is only added when explicitly enabled."""
+        self.test_record.email = "test@example.com"
+        form = self.open_mail_composer_form()
+        composer = form.save()
+        composer.partner_cc_ids = self.partner_cc
+        composer.partner_bcc_ids = self.partner_bcc
+
+        with self.mock_mail_gateway():
+            composer.with_context(expose_x_odoo_bcc=True)._action_send_mail()
+
+        markers = [
+            (mail.get("headers") or {}).get("X-Odoo-Bcc")
+            for mail in self._mails
+            if (mail.get("headers") or {}).get("X-Odoo-Bcc")
+        ]
+        self.assertEqual(len(markers), 1)
+        self.assertIn(self.partner_bcc.email, markers[0])
 
     def test_template_cc_bcc(self):
         env = self.env

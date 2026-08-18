@@ -28,4 +28,5 @@ covered — invoice sending is the main one, since `account.move.send` calls
 composer / template code to be sure it is aligned with standard recipients
 management"). Supporting Bcc there would mean carrying the template value
 through the standard `mail.template` → `mail.mail` generation, which is a
-separate feature rather than part of this module.
+separate feature rather than part of this module: `mail_composer_cc_bcc_account`
+covers the invoice flow.

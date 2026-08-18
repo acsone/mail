@@ -2,6 +2,8 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
 
+import os
+
 from odoo import fields, models, tools
 
 from odoo.addons.base.models.ir_mail_server import extract_rfc2822_addresses
@@ -24,6 +26,18 @@ class MailMail(models.Model):
     _inherit = "mail.mail"
 
     email_bcc = fields.Char("Bcc", help="Blind Cc message recipients")
+
+    def _expose_bcc_marker(self):
+        """Whether to also add the informational ``X-Odoo-Bcc`` marker header.
+
+        Disabled by default: unlike ``Bcc``, the marker is not stripped before
+        sending, so it reaches the Bcc recipient. Enable it through the
+        ``expose_x_odoo_bcc`` context key or the ``EXPOSE_X_ODOO_BCC``
+        environment variable. Ported from OCA/mail#233 (18.0).
+        """
+        if self.env.context.get("expose_x_odoo_bcc"):
+            return True
+        return tools.str2bool(os.environ.get("EXPOSE_X_ODOO_BCC") or "", False)
 
     def _prepare_outgoing_list(self, mail_server=False, doc_to_followers=None):
         # First, return if we're not coming from the Mail Composer
@@ -68,13 +82,16 @@ class MailMail(models.Model):
             if m["email_to"]:
                 rcpt_to = extract_rfc2822_addresses(m["email_to"][0])[0]
 
-                # If the recipient is a Bcc, we had an explicit header X-Odoo-Bcc
-                # - It won't be shown by the email client, but can be useful for a recipient # noqa: E501
-                #   to understand why he received a given email
-                # - Also note that in python3, the smtp.send_message method does not
-                #   transmit the Bcc field of a Message object
+                # If the recipient is a Bcc, set a real Bcc header on its own
+                # email only: IrMailServer._prepare_smtp_to_list uses it to build
+                # the envelope and _alter_message__ strips it right after, so it
+                # is never transmitted and cannot leak.
                 if rcpt_to in email_bcc:
-                    m["headers"].update({"X-Odoo-Bcc": m["email_to"][0]})
+                    m["headers"]["Bcc"] = m["email_to"][0]
+                    # Optional legacy marker. Unlike Bcc it survives sending, so
+                    # only add it when explicitly enabled (OCA/mail#233).
+                    if self._expose_bcc_marker():
+                        m["headers"]["X-Odoo-Bcc"] = m["email_to"][0]
 
             m.update(
                 {
