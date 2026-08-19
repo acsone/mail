@@ -3,7 +3,7 @@
 import hashlib
 import inspect
 
-from odoo import tools
+from odoo import Command, tools
 from odoo.tests import Form, tagged
 
 from odoo.addons.base.models.ir_mail_server import extract_rfc2822_addresses
@@ -213,6 +213,41 @@ class TestMailCcBcc(TestMailComposerForm, MailComposerCcBccMixin):
         ]
         self.assertEqual(len(markers), 1)
         self.assertIn(self.partner_bcc.email, markers[0])
+
+    def test_email_cc_bcc_recipient_without_email(self):
+        """A recipient with no email must not take the whole mail.mail down.
+
+        Core builds a '"Name" <@False>' placeholder for such a partner, from
+        which no address can be extracted; indexing it blindly raised
+        IndexError and nobody received the message.
+        """
+        partner_no_email = self.env["res.partner"].create({"name": "No Email"})
+        mail = self.env["mail.mail"].create(
+            {
+                "subject": "test",
+                "body_html": "<p>test</p>",
+                "recipient_ids": [
+                    Command.set((self.partner_cc + partner_no_email).ids)
+                ],
+            }
+        )
+
+        outgoing = mail.with_context(is_from_composer=True)._prepare_outgoing_list()
+
+        # no exception, and one entry per recipient
+        self.assertEqual(len(outgoing), 2)
+
+        # the placeholder entry is left exactly as core built it, so that core
+        # finds no SMTP recipient for it, raises NO_VALID_RECIPIENT and skips
+        # only this one
+        placeholder = [e for e in outgoing if "No Email" in str(e["email_to"])]
+        self.assertEqual(len(placeholder), 1)
+        self.assertEqual(placeholder[0]["email_to"], ['"No Email" <@False>'])
+
+        # while the valid recipient did get the module's shared To header
+        valid = [e for e in outgoing if e is not placeholder[0]]
+        self.assertEqual(len(valid), 1)
+        self.assertIn("partner_cc@example.com", str(valid[0]["email_to"]))
 
     def test_template_cc_bcc(self):
         env = self.env

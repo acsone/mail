@@ -68,8 +68,8 @@ class MailMail(models.Model):
         # email client as users expect)
         for m in res:
             # Odoo reuses the headers dictionary for all outgoing entries:
-            # copy it before adding recipient-specific headers. Odoo 19 also adds every external recipient to 'X-Msg-To-Add', which
-            # every external recipient to 'X-Msg-To-Add', which
+            # copy it before adding recipient-specific headers. Odoo 19 also
+            # adds every external recipient to 'X-Msg-To-Add', which
             # IrMailServer._alter_message__ merges into the To header to enable
             # Reply-All: here it would put the Cc *and the Bcc* recipients in To,
             # so drop it — this module builds the whole To / Cc itself.
@@ -78,20 +78,33 @@ class MailMail(models.Model):
                 for key, value in m["headers"].items()
                 if key != "X-Msg-To-Add"
             }
-            rcpt_to = None
-            if m["email_to"]:
-                rcpt_to = extract_rfc2822_addresses(m["email_to"][0])[0]
+            # A recipient partner with no email address yields the
+            # '"Name" <@False>' placeholder that core builds on purpose
+            # (MailMail._prepare_outgoing_list), from which no address can be
+            # extracted. Leave that entry untouched: core then finds no SMTP
+            # recipient for it, raises NO_VALID_RECIPIENT and skips only this
+            # recipient, delivering the message to all the others. Indexing
+            # blindly here used to raise IndexError and take the whole
+            # mail.mail down with it.
+            addresses = [
+                address
+                for address in extract_rfc2822_addresses(m["email_to"][0])
+                if tools.mail.email_normalize(address)
+            ]
+            if not addresses:
+                continue
+            rcpt_to = addresses[0]
 
-                # If the recipient is a Bcc, set a real Bcc header on its own
-                # email only: IrMailServer._prepare_smtp_to_list uses it to build
-                # the envelope and _alter_message__ strips it right after, so it
-                # is never transmitted and cannot leak.
-                if rcpt_to in email_bcc:
-                    m["headers"]["Bcc"] = m["email_to"][0]
-                    # Optional legacy marker. Unlike Bcc it survives sending, so
-                    # only add it when explicitly enabled (OCA/mail#233).
-                    if self._expose_bcc_marker():
-                        m["headers"]["X-Odoo-Bcc"] = m["email_to"][0]
+            # If the recipient is a Bcc, set a real Bcc header on its own
+            # email only: IrMailServer._prepare_smtp_to_list uses it to build
+            # the envelope and _alter_message__ strips it right after, so it
+            # is never transmitted and cannot leak.
+            if rcpt_to in email_bcc:
+                m["headers"]["Bcc"] = m["email_to"][0]
+                # Optional legacy marker. Unlike Bcc it survives sending, so
+                # only add it when explicitly enabled (OCA/mail#233).
+                if self._expose_bcc_marker():
+                    m["headers"]["X-Odoo-Bcc"] = m["email_to"][0]
 
             m.update(
                 {
