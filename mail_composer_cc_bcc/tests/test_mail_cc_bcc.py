@@ -7,7 +7,6 @@ from odoo import Command, tools
 from odoo.tests import Form, tagged
 
 from odoo.addons.base.models.ir_mail_server import extract_rfc2822_addresses
-
 from odoo.addons.mail.tests.common import MailCase
 from odoo.addons.mail.tests.test_mail_composer import TestMailComposerForm
 from odoo.addons.mail.wizard.mail_compose_message import (

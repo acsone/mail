@@ -44,10 +44,9 @@ class MailMail(models.Model):
         res = super()._prepare_outgoing_list(
             mail_server=mail_server, doc_to_followers=doc_to_followers
         )
-        is_out_of_scope = len(self.ids) > 1
         is_from_composer = self.env.context.get("is_from_composer", False)
 
-        if is_out_of_scope or not is_from_composer:
+        if not is_from_composer:
             return res
 
         # In the absence of self.email_to, Odoo builds an extra Cc-only email
@@ -55,10 +54,23 @@ class MailMail(models.Model):
         # already gets its own email, so that one is a duplicate here.
         res = [m for m in res if m["email_to"]]
 
-        # Prepare values for To, Cc headers
+        # The To / Cc headers must be identical on every email, but no single
+        # mail.mail knows the whole audience: followers never reach
+        # partner_ids, and the notification may be split into one mail.mail
+        # per lang. MailThread._notify_thread_by_email publishes the full
+        # audience through the context (OCA/mail#233).
         partners_cc_bcc = self.recipient_cc_ids + self.recipient_bcc_ids
-        partner_to_ids = [r.id for r in self.recipient_ids if r not in partners_cc_bcc]
-        partner_to = self.env["res.partner"].browse(partner_to_ids)
+        # Fall back to this mail.mail's own recipients when the context is
+        # absent (a direct _prepare_outgoing_list call that does not go
+        # through _notify_thread_by_email): the audience is then unknown and
+        # the pre-#233 behaviour is the only correct answer.
+        all_recipients = (
+            self.env["res.partner"].browse(
+                self.env.context.get("composer_recipient_ids") or []
+            )
+            or self.recipient_ids
+        )
+        partner_to = all_recipients - partners_cc_bcc
         email_to = format_emails(partner_to)
         email_to_raw = format_emails_raw(partner_to)
         email_cc = format_emails_str(self.recipient_cc_ids)
